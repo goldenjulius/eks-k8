@@ -1,1 +1,9 @@
+region: us-west-2
+vpcId: "<your-vpc-id>"
+clusterName: nonprod-eks
+serviceAccount:
+  create: false
+  name: aws-load-balancer-controller
+  annotations:
+    eks.amazonaws.com/role-arn: "<your-IRSA-role-arn>"
 
