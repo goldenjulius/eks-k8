@@ -1,1 +1,165 @@
 
+AWSTemplateFormatVersion: 2010-09-09
+Description: EKS Cluster with Managed Node Groups, Addons, and IRSA
+
+Parameters:
+  ClusterName:
+    Type: String
+    Default: nonprod-eks
+  KubernetesVersion:
+    Type: String
+    Default: "1.29"
+  VpcId:
+    Type: AWS::EC2::VpcId
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  NodeInstanceType:
+    Type: String
+    Default: "m5.large"
+
+Resources:
+
+  ClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: "sts:AssumeRole"
+            Principal:
+              Service: "eks.amazonaws.com"
+            Effect: "Allow"
+
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+
+  Cluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Ref ClusterName
+      Version: !Ref KubernetesVersion
+      RoleArn: !GetAtt ClusterRole.Arn
+      ResourcesVpcConfig:
+        SubnetIds: !Ref SubnetIds
+        SecurityGroupIds: []
+        EndpointPrivateAccess: true
+        EndpointPublicAccess: false
+
+  NodegroupLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        InstanceType: !Ref NodeInstanceType
+        ImageId: !Sub "{{resolve:ssm:/aws/service/eks/optimized-ami/${KubernetesVersion}/amazon-linux-2/recommended/image_id}}"
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -eux
+            /etc/eks/bootstrap.sh ${ClusterName} --kubelet-extra-args '--node-labels=role=worker'
+
+  NodegroupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: "sts:AssumeRole"
+            Principal:
+              Service: "ec2.amazonaws.com"
+            Effect: "Allow"
+
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+        - "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+
+  Nodegroup1:
+    Type: AWS::EKS::Nodegroup
+    Properties:
+      ClusterName: !Ref Cluster
+      NodeRole: !GetAtt NodegroupRole.Arn
+      Subnets: !Ref SubnetIds
+      ScalingConfig:
+        DesiredSize: 2
+        MaxSize: 4
+        MinSize: 1
+      LaunchTemplate:
+        Id: !Ref NodegroupLaunchTemplate
+        Version: !GetAtt NodegroupLaunchTemplate.LatestVersionNumber
+
+  Nodegroup2:
+    Type: AWS::EKS::Nodegroup
+    Properties:
+      ClusterName: !Ref Cluster
+      NodeRole: !GetAtt NodegroupRole.Arn
+      Subnets: !Ref SubnetIds
+      ScalingConfig:
+        DesiredSize: 2
+        MaxSize: 4
+        MinSize: 1
+      LaunchTemplate:
+        Id: !Ref NodegroupLaunchTemplate
+        Version: !GetAtt NodegroupLaunchTemplate.LatestVersionNumber
+
+  Nodegroup3:
+    Type: AWS::EKS::Nodegroup
+    Properties:
+      ClusterName: !Ref Cluster
+      NodeRole: !GetAtt NodegroupRole.Arn
+      Subnets: !Ref SubnetIds
+      ScalingConfig:
+        DesiredSize: 2
+        MaxSize: 4
+        MinSize: 1
+      LaunchTemplate:
+        Id: !Ref NodegroupLaunchTemplate
+        Version: !GetAtt NodegroupLaunchTemplate.LatestVersionNumber
+
+  ClusterAddonsVpcCni:
+    Type: AWS::EKS::Addon
+    Properties:
+      ClusterName: !Ref Cluster
+      AddonName: "vpc-cni"
+
+  ClusterAddonsCoreDNS:
+    Type: AWS::EKS::Addon
+    Properties:
+      ClusterName: !Ref Cluster
+      AddonName: "coredns"
+
+  ClusterAddonsEBSCSI:
+    Type: AWS::EKS::Addon
+    Properties:
+      ClusterName: !Ref Cluster
+      AddonName: "aws-ebs-csi-driver"
+
+  ClusterAddonsKubeProxy:
+    Type: AWS::EKS::Addon
+    Properties:
+      ClusterName: !Ref Cluster
+      AddonName: "kube-proxy"
+
+  IRSAForLoadBalancerController:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: "sts:AssumeRoleWithWebIdentity"
+            Principal:
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/${Cluster.Oidc.Issuer}"
+
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AWSLoadBalancerControllerIAMPolicy"
+
+Outputs:
+  ClusterName:
+    Description: The name of the EKS Cluster
+    Value: !Ref Cluster
+
+  ClusterOidc:
+    Description: OIDC Provider for the Cluster
+    Value: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/${Cluster.Oidc.Issuer}"
+
+  IRSAForLoadBalancerControllerArn:
+    Description: IAM Role for AWS LB Controller
+    Value: !GetAtt IRSAForLoadBalancerController.Arn
