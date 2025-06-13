@@ -1,1 +1,5 @@
-
+datadog:
+  site: "datadoghq.com"
+  APIKey: "<your-datadog-API-key>"
+  daemonset:
+    useHostPID: true
